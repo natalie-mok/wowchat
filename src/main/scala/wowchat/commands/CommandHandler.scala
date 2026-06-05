@@ -50,37 +50,54 @@ object CommandHandler extends StrictLogging {
       None
     }
 
+    var commandHandled = false
+    var responseMessage: Option[String] = None
+
     Try {
       possibleCommand match {
         case "who" | "online" =>
           Global.game.fold({
             Discord.sendMessage(fromChannel, NOT_ONLINE)
-            return true
+            commandHandled = true
           })(game => {
             val whoSucceeded = game.handleWho(arguments)
             // Only set whoRequest if we're actually doing a WHO query (with arguments)
             // For listing all guildies (no arguments), we don't need to track the request
             if (arguments.isDefined) {
               whoRequest = WhoRequest(fromChannel, arguments.get)
+            } else {
+              // For ?who with no arguments, immediately send the response
+              responseMessage = whoSucceeded
             }
+            commandHandled = true
             whoSucceeded
           })
         case "gmotd" =>
           Global.game.fold({
             Discord.sendMessage(fromChannel, NOT_ONLINE)
-            return true
-          })(_.handleGmotd())
+            commandHandled = true
+          })(game => {
+            responseMessage = game.handleGmotd()
+            commandHandled = true
+            responseMessage
+          })
+        case _ =>
+          // Unknown command
+          commandHandled = false
       }
     }.fold(throwable => {
-      // command not found, should send to wow chat
-      false
-    }, opt => {
-      // command found, do not send to wow chat
-      if (opt.isDefined) {
-        Discord.sendMessage(fromChannel, opt.get)
-      }
-      true
+      // Exception occurred, not a command
+      commandHandled = false
+    }, _ => {
+      // Command was recognized
     })
+
+    // Send response if we have one
+    if (responseMessage.isDefined) {
+      Discord.sendMessage(fromChannel, responseMessage.get)
+    }
+
+    commandHandled
   }
 
   // eww
