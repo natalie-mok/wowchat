@@ -21,17 +21,28 @@ object CommandHandler extends StrictLogging {
 
   // gross. rewrite
   var whoRequest: WhoRequest = _
+  var lastWhoChannel: Option[MessageChannel] = None
 
   /**
    * Cleans Discord mention and plain text arguments.
    * Converts <@userid> or @username to just the username
    */
   private def cleanArgument(arg: String): String = {
+    if (arg == null || arg.isEmpty) {
+      return arg
+    }
+    
     // Handle Discord mention format: <@userid> or <@!userid>
-    if (arg.startsWith("<@") && arg.endsWith(">")) {
-      // Extract just the ID/username portion and remove special chars
-      arg.substring(2, arg.length - 1).replaceAll("[!&]", "")
-    } else if (arg.startsWith("@")) {
+    if (arg.startsWith("<@") && arg.endsWith(">") && arg.length > 3) {
+      try {
+        // Extract just the ID/username portion and remove special chars
+        arg.substring(2, arg.length - 1).replaceAll("[!&]", "")
+      } catch {
+        case e: Exception =>
+          logger.error(s"Error parsing Discord mention '$arg': $e")
+          arg
+      }
+    } else if (arg.startsWith("@") && arg.length > 1) {
       // Handle @username format - just strip the @
       arg.substring(1)
     } else {
@@ -65,19 +76,17 @@ object CommandHandler extends StrictLogging {
             Discord.sendMessage(fromChannel, NOT_ONLINE)
             commandHandled = true
           })(game => {
-            val whoResult = game.handleWho(arguments)
-            commandHandled = true
-            
             if (arguments.isDefined) {
-              // User is querying for a specific player - set whoRequest and wait for response
+              // User is querying for a specific player
               whoRequest = WhoRequest(fromChannel, arguments.get)
-              logger.debug(s"WHO query for player: ${arguments.get}")
+              lastWhoChannel = Some(fromChannel)
+              game.handleWho(arguments)
             } else {
-              // User is querying for all online guildies - send immediately
-              responseMessage = whoResult
-              logger.debug(s"WHO query for all guildies, response: $responseMessage")
+              // User is querying for all online guildies
+              lastWhoChannel = Some(fromChannel)
+              responseMessage = game.handleWho(arguments)
             }
-            whoResult
+            commandHandled = true
           })
         case "gmotd" =>
           Global.game.fold({
@@ -86,23 +95,17 @@ object CommandHandler extends StrictLogging {
           })(game => {
             responseMessage = game.handleGmotd()
             commandHandled = true
-            responseMessage
           })
         case _ =>
-          // Unknown command
           commandHandled = false
       }
     }.fold(throwable => {
-      // Exception occurred, not a command
-      logger.error(s"Error handling command: $throwable")
+      logger.error(s"Error handling command '$possibleCommand': ${throwable.getMessage}", throwable)
       commandHandled = false
-    }, _ => {
-      // Command was recognized
-    })
+    }, _ => {})
 
-    // Send response if we have one
+    // Send response if we have one (for immediate responses like guild list)
     if (responseMessage.isDefined) {
-      logger.debug(s"Sending response to Discord: ${responseMessage.get}")
       Discord.sendMessage(fromChannel, responseMessage.get)
     }
 
