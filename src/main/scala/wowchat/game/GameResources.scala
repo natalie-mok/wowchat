@@ -2,7 +2,7 @@ package wowchat.game
 
 import wowchat.common.{WowChatConfig, WowExpansion}
 
-import scala.io.Source
+import scala.io.{Codec, Source}
 
 object GameResources {
 
@@ -15,7 +15,7 @@ object GameResources {
 
   private def readIDNameFile(file: String) = {
     Source
-      .fromResource(file)
+      .fromResource(file)(Codec.UTF8)
       .getLines
       .map(str => {
         val splt = str.split(",", 2)
