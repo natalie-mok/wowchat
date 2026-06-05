@@ -338,7 +338,8 @@ class Discord(discordConnectionCallback: CommonConnectionCallback) extends Liste
     val discordConf = Global.config.discord
     val trimmed = message.drop(1).toLowerCase
 
-    message.startsWith(".") &&
+    // Require .<command> (e.g. .s in), not arbitrary leading dots like "..."
+    message.startsWith(".") && message.length > 1 && message(1).isLetterOrDigit &&
     discordConf.enableDotCommands &&
       (
         discordConf.dotCommandsWhitelist.isEmpty ||
