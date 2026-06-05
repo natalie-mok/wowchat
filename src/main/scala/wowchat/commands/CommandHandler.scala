@@ -7,7 +7,6 @@ import wowchat.discord.Discord
 import wowchat.game.{GamePackets, GameResources, GuildInfo, GuildMember}
 
 import scala.collection.mutable
-import scala.util.Try
 
 case class WhoRequest(messageChannel: MessageChannel, playerName: String)
 case class WhoResponse(playerName: String, guildName: String, lvl: Int, cls: String, race: String, gender: Option[String], zone: String)
@@ -15,44 +14,10 @@ case class WhoResponse(playerName: String, guildName: String, lvl: Int, cls: Str
 object CommandHandler extends StrictLogging {
 
   private val NOT_ONLINE = "Bot is not online."
-
-  // make some of these configurable
   private val trigger = "?"
 
-  // gross. rewrite
   var whoRequest: WhoRequest = _
-  var lastWhoChannel: Option[MessageChannel] = None
 
-  /**
-   * Cleans Discord mention and plain text arguments.
-   * Converts <@userid> or @username to just the username
-   */
-  private def cleanArgument(arg: String): String = {
-    if (arg == null || arg.isEmpty) {
-      return arg
-    }
-    
-    // Handle Discord mention format: <@userid> or <@!userid>
-    if (arg.startsWith("<@") && arg.endsWith(">") && arg.length > 3) {
-      try {
-        // Extract just the ID/username portion and remove special chars
-        arg.substring(2, arg.length - 1).replaceAll("[!&]", "")
-      } catch {
-        case e: Exception =>
-          logger.error(s"Error parsing Discord mention '$arg': $e")
-          arg
-      }
-    } else if (arg.startsWith("@") && arg.length > 1) {
-      // Handle @username format - just strip the @
-      arg.substring(1)
-    } else {
-      // Plain username
-      arg
-    }
-  }
-
-  // returns back the message as an option if unhandled
-  // needs to be refactored into a Map[String, <Intelligent Command Handler Function>]
   def apply(fromChannel: MessageChannel, message: String): Boolean = {
     if (!message.startsWith(trigger)) {
       return false
@@ -60,59 +25,55 @@ object CommandHandler extends StrictLogging {
 
     val splt = message.substring(trigger.length).split(" ")
     val possibleCommand = splt(0).toLowerCase
-    val arguments = if (splt.length > 1) {
-      Some(cleanArgument(splt(1)))
-    } else {
-      None
+    val arguments = if (splt.length > 1) Some(splt(1)) else None
+
+    possibleCommand match {
+      case "who" | "online" =>
+        handleWhoCommand(fromChannel, arguments)
+        true
+
+      case "gmotd" =>
+        handleGmotdCommand(fromChannel)
+        true
+
+      case _ =>
+        false
     }
-
-    var commandHandled = false
-    var responseMessage: Option[String] = None
-
-    Try {
-      possibleCommand match {
-        case "who" | "online" =>
-          Global.game.fold({
-            Discord.sendMessage(fromChannel, NOT_ONLINE)
-            commandHandled = true
-          })(game => {
-            if (arguments.isDefined) {
-              // User is querying for a specific player
-              whoRequest = WhoRequest(fromChannel, arguments.get)
-              lastWhoChannel = Some(fromChannel)
-              game.handleWho(arguments)
-            } else {
-              // User is querying for all online guildies
-              lastWhoChannel = Some(fromChannel)
-              responseMessage = game.handleWho(arguments)
-            }
-            commandHandled = true
-          })
-        case "gmotd" =>
-          Global.game.fold({
-            Discord.sendMessage(fromChannel, NOT_ONLINE)
-            commandHandled = true
-          })(game => {
-            responseMessage = game.handleGmotd()
-            commandHandled = true
-          })
-        case _ =>
-          commandHandled = false
-      }
-    }.fold(throwable => {
-      logger.error(s"Error handling command '$possibleCommand': ${throwable.getMessage}", throwable)
-      commandHandled = false
-    }, _ => {})
-
-    // Send response if we have one (for immediate responses like guild list)
-    if (responseMessage.isDefined) {
-      Discord.sendMessage(fromChannel, responseMessage.get)
-    }
-
-    commandHandled
   }
 
-  // eww
+  private def handleWhoCommand(fromChannel: MessageChannel, arguments: Option[String]): Unit = {
+    Global.game.fold({
+      Discord.sendMessage(fromChannel, NOT_ONLINE)
+    })(game => {
+      if (arguments.isDefined) {
+        // User is querying for a specific player - send WHO packet to WoW and wait for response
+        logger.debug(s"WHO query for player: ${arguments.get}")
+        whoRequest = WhoRequest(fromChannel, arguments.get)
+        game.handleWho(arguments)
+      } else {
+        // User is querying for all online guildies - return immediately from guild roster
+        logger.debug("WHO query for all online guildies")
+        val response = game.handleWho(arguments)
+        if (response.isDefined) {
+          Discord.sendMessage(fromChannel, response.get)
+        } else {
+          Discord.sendMessage(fromChannel, "Currently no guildies online.")
+        }
+      }
+    })
+  }
+
+  private def handleGmotdCommand(fromChannel: MessageChannel): Unit = {
+    Global.game.fold({
+      Discord.sendMessage(fromChannel, NOT_ONLINE)
+    })(game => {
+      val response = game.handleGmotd()
+      if (response.isDefined) {
+        Discord.sendMessage(fromChannel, response.get)
+      }
+    })
+  }
+
   def handleWhoResponse(whoResponse: Option[WhoResponse],
                         guildInfo: GuildInfo,
                         guildRoster: mutable.Map[Long, GuildMember],
@@ -125,7 +86,7 @@ object CommandHandler extends StrictLogging {
         .values
         .filter(guildRosterMatcherFunc)
         .map(guildMember => {
-          val cls = new GamePackets{}.Classes.valueOf(guildMember.charClass) // ... should really move that out
+          val cls = new GamePackets{}.Classes.valueOf(guildMember.charClass)
           val days = guildMember.lastLogoff.toInt
           val hours = ((guildMember.lastLogoff * 24) % 24).toInt
           val minutes = ((guildMember.lastLogoff * 24 * 60) % 60).toInt
@@ -136,9 +97,6 @@ object CommandHandler extends StrictLogging {
           val guildNameStr = if (guildInfo != null) {
             s" <${guildInfo.name}>"
           } else {
-            // Welp, some servers don't set guild guid in character selection packet.
-            // The only other way to get this information is through parsing SMSG_UPDATE_OBJECT
-            // and its compressed version which is quite annoying especially across expansions.
             ""
           }
 
