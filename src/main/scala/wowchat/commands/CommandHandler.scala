@@ -22,6 +22,19 @@ object CommandHandler extends StrictLogging {
   // gross. rewrite
   var whoRequest: WhoRequest = _
 
+  /**
+   * Cleans Discord mention format from arguments.
+   * Converts <@userid>, <@!userid>, or <@&roleid> to just the ID or returns the original string
+   */
+  private def cleanDiscordMention(arg: String): String = {
+    if (arg.startsWith("<@") && arg.endsWith(">")) {
+      // Extract ID from mention format: <@id>, <@!id>, or <@&id>
+      arg.substring(2, arg.length - 1).replaceAll("[!&]", "")
+    } else {
+      arg
+    }
+  }
+
   // returns back the message as an option if unhandled
   // needs to be refactored into a Map[String, <Intelligent Command Handler Function>]
   def apply(fromChannel: MessageChannel, message: String): Boolean = {
@@ -31,7 +44,11 @@ object CommandHandler extends StrictLogging {
 
     val splt = message.substring(trigger.length).split(" ")
     val possibleCommand = splt(0).toLowerCase
-    val arguments = if (splt.length > 1 && splt(1).length <= 16) Some(splt(1)) else None
+    val arguments = if (splt.length > 1) {
+      Some(cleanDiscordMention(splt(1)))
+    } else {
+      None
+    }
 
     Try {
       possibleCommand match {
@@ -41,6 +58,8 @@ object CommandHandler extends StrictLogging {
             return true
           })(game => {
             val whoSucceeded = game.handleWho(arguments)
+            // Only set whoRequest if we're actually doing a WHO query (with arguments)
+            // For listing all guildies (no arguments), we don't need to track the request
             if (arguments.isDefined) {
               whoRequest = WhoRequest(fromChannel, arguments.get)
             }
