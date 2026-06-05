@@ -191,7 +191,12 @@ class GamePacketHandler(realmId: Int, realmName: String, sessionKey: Array[Byte]
       ctx.get.writeAndFlush(Packet(CMSG_WHO, byteBuf))
       None
     } else {
-      Some(buildGuildiesOnline)
+      if (guildRoster.isEmpty) {
+        updateGuildRoster
+        Some("Guild roster is loading, please try again in a moment.")
+      } else {
+        Some(buildGuildiesOnline)
+      }
     }
   }
 
@@ -660,6 +665,11 @@ class GamePacketHandler(realmId: Int, realmName: String, sessionKey: Array[Byte]
   // This is actually really hard to map back to a specific request
   // because the packet doesn't include a cookie/id/requested name if none found
   private def handle_SMSG_WHO(msg: Packet): Unit = {
+    if (CommandHandler.whoRequest == null) {
+      logger.debug("Ignoring SMSG_WHO with no pending who request")
+      return
+    }
+
     val displayResults = parseWhoResponse(msg)
     // Try to find exact match
     val exactName = CommandHandler.whoRequest.playerName.toLowerCase

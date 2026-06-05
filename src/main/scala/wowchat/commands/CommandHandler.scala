@@ -22,6 +22,23 @@ object CommandHandler extends StrictLogging {
   // gross. rewrite
   var whoRequest: WhoRequest = _
 
+  private def parseWhoArgument(message: String): Option[String] = {
+    val body = message.substring(trigger.length).trim
+    val spaceIdx = body.indexOf(' ')
+    if (spaceIdx == -1) {
+      None
+    } else {
+      val raw = body.substring(spaceIdx + 1).trim
+      if (raw.isEmpty) {
+        None
+      } else {
+        // Discord mentions arrive as @DisplayName; WoW names cannot contain @
+        val normalized = raw.stripPrefix("@")
+        if (normalized.nonEmpty && normalized.length <= 12) Some(normalized) else None
+      }
+    }
+  }
+
   // returns back the message as an option if unhandled
   // needs to be refactored into a Map[String, <Intelligent Command Handler Function>]
   def apply(fromChannel: MessageChannel, message: String): Boolean = {
@@ -29,9 +46,14 @@ object CommandHandler extends StrictLogging {
       return false
     }
 
-    val splt = message.substring(trigger.length).split(" ")
-    val possibleCommand = splt(0).toLowerCase
-    val arguments = if (splt.length > 1 && splt(1).length <= 16) Some(splt(1)) else None
+    val body = message.substring(trigger.length).trim
+    val spaceIdx = body.indexOf(' ')
+    val possibleCommand = (if (spaceIdx == -1) body else body.substring(0, spaceIdx)).toLowerCase
+    val arguments = if (possibleCommand == "who" || possibleCommand == "online") {
+      parseWhoArgument(message)
+    } else {
+      None
+    }
 
     Try {
       possibleCommand match {
@@ -40,11 +62,14 @@ object CommandHandler extends StrictLogging {
             Discord.sendMessage(fromChannel, NOT_ONLINE)
             return true
           })(game => {
-            val whoSucceeded = game.handleWho(arguments)
-            if (arguments.isDefined) {
-              whoRequest = WhoRequest(fromChannel, arguments.get)
+            arguments match {
+              case Some(name) =>
+                logger.debug(s"WHO query for player: $name")
+                whoRequest = WhoRequest(fromChannel, name)
+              case None =>
+                logger.debug("WHO query for guild online list")
             }
-            whoSucceeded
+            game.handleWho(arguments)
           })
         case "gmotd" =>
           Global.game.fold({
@@ -53,7 +78,7 @@ object CommandHandler extends StrictLogging {
           })(_.handleGmotd())
       }
     }.fold(throwable => {
-      // command not found, should send to wow chat
+      logger.error(s"Command failed: $message", throwable)
       false
     }, opt => {
       // command found, do not send to wow chat
