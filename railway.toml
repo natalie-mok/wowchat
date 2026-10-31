@@ -1,0 +1,11 @@
+# Cap JVM heap — without this, Railway often shows multi-GB memory usage for Java.
+# Also set in the Railway dashboard (immediate effect on restart):
+#   JAVA_TOOL_OPTIONS=-Xms32m -Xmx192m -XX:+UseSerialGC -XX:MaxMetaspaceSize=96m
+# And under Settings → Deploy → Replica Limits → Memory ≈ 512 MB.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
