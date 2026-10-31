@@ -15,7 +15,7 @@ import net.dv8tion.jda.api.events.message.MessageReceivedEvent
 import net.dv8tion.jda.api.events.session.ShutdownEvent
 import net.dv8tion.jda.api.hooks.ListenerAdapter
 import net.dv8tion.jda.api.requests.{CloseCode, GatewayIntent}
-import net.dv8tion.jda.api.utils.MemberCachePolicy
+import net.dv8tion.jda.api.utils.{ChunkingFilter, MemberCachePolicy}
 import net.dv8tion.jda.api.utils.cache.CacheFlag
 import wowchat.game.GamePackets
 
@@ -78,16 +78,26 @@ object Discord {
 class Discord(discordConnectionCallback: CommonConnectionCallback) extends ListenerAdapter
   with GamePackets with StrictLogging {
 
+  // createLight skips voice/presence caches. Keep ALL members for WoW @tag resolution.
+  // GUILD_PRESENCES was unused and roughly doubles Discord-side memory for large servers.
   private val jda = JDABuilder
-    .createDefault(Global.config.discord.token,
+    .createLight(Global.config.discord.token,
       GatewayIntent.GUILD_EXPRESSIONS,
       GatewayIntent.GUILD_MEMBERS,
       GatewayIntent.GUILD_MESSAGES,
-      GatewayIntent.GUILD_PRESENCES,
       GatewayIntent.MESSAGE_CONTENT)
     .setMemberCachePolicy(MemberCachePolicy.ALL)
-    .disableCache(CacheFlag.SCHEDULED_EVENTS,
-      CacheFlag.VOICE_STATE)
+    .setChunkingFilter(ChunkingFilter.ALL)
+    .enableCache(CacheFlag.EMOJI)
+    .disableCache(
+      CacheFlag.ACTIVITY,
+      CacheFlag.CLIENT_STATUS,
+      CacheFlag.ONLINE_STATUS,
+      CacheFlag.SCHEDULED_EVENTS,
+      CacheFlag.VOICE_STATE,
+      CacheFlag.STICKER,
+      CacheFlag.FORUM_TAGS
+    )
     .addEventListeners(this)
     .build
 
@@ -272,7 +282,7 @@ class Discord(discordConnectionCallback: CommonConnectionCallback) extends Liste
   override def onShutdown(event: ShutdownEvent): Unit = {
     event.getCloseCode match {
       case CloseCode.DISALLOWED_INTENTS =>
-        logger.error("Per new Discord rules, you must check the PRESENCE INTENT, SERVER MEMBERS INTENT, and MESSAGE CONTENT INTENT boxes under \"Privileged Gateway Intents\" for this bot in the developer portal. You can find more info at https://discord.com/developers/docs/topics/gateway#privileged-intents")
+        logger.error("Per Discord rules, you must enable SERVER MEMBERS INTENT and MESSAGE CONTENT INTENT under \"Privileged Gateway Intents\" for this bot in the developer portal. https://discord.com/developers/docs/topics/gateway#privileged-intents")
       case _ =>
     }
   }

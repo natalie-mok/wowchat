@@ -37,7 +37,8 @@ object WoWChat extends StrictLogging {
       private val reconnectDelay = new ReconnectDelay
 
       override def connect: Unit = {
-        Global.group = new NioEventLoopGroup
+        // Two threads is enough for one realm + one game connection; default uses 2*CPU cores.
+        Global.group = new NioEventLoopGroup(2)
 
         val realmConnector = new RealmConnector(new RealmConnectionCallback {
           override def success(host: String, port: Int, realmName: String, realmId: Int, sessionKey: Array[Byte]): Unit = {
